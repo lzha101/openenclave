@@ -5,9 +5,16 @@
 #include <string.h>
 
 #include <openenclave/enclave.h>
+#include <mbedtls/x509_crt.h>
 
 #include "cyres_optee.h"
 #include "enclavelibc.h"
+
+oe_result_t oe_parse_report_internal(
+    mbedtls_x509_crt* chain,
+    _In_reads_bytes_(report_size) const uint8_t* report,
+    _In_ size_t report_size,
+    oe_report_t* parsed_report);
 
 oe_result_t oe_get_report_v2(
     uint32_t flags,
@@ -29,6 +36,76 @@ oe_result_t oe_verify_report(
     size_t report_size,
     oe_report_t* parsed_report)
 {
-    /* Not supported */
-    return OE_UNSUPPORTED;
+    oe_result_t result = OE_OK;
+
+    mbedtls_x509_crt chain = {0};
+    mbedtls_x509_crt local_chain = {0};
+
+    mbedtls_x509_crt_init(&chain);
+    int res = mbedtls_x509_crt_parse(&chain, report, report_size);
+    if (res != 0)
+    {
+        result = OE_FAILURE;
+        goto Cleanup;
+    }
+
+    // validate the cert chain contains CyReS measurements
+
+    result = oe_parse_report_internal(&chain, report, report_size, parsed_report);
+    if (result != OE_OK)
+    {
+        goto Cleanup;
+    }
+
+    // validate the chain is properly rooted
+
+    mbedtls_x509_crt* root = chain.next->next->next;
+    while (root->next)
+        root = root->next;
+
+    uint32_t validation_flags = 0;
+    res = mbedtls_x509_crt_verify(
+        &chain, root, NULL, NULL, &validation_flags, NULL, NULL);
+    if (res != 0 || validation_flags != 0)
+    {
+        result = OE_FAILURE;
+        goto Cleanup;
+    }
+
+    // validate the loader cert (parent) is matching
+
+    uint8_t* local_report;
+    size_t local_report_size;
+    result = oe_get_report_v2(
+        0, NULL, 0, NULL, 0, &local_report, &local_report_size);
+    if (result != OE_OK)
+    {
+        goto Cleanup;
+    }
+
+    mbedtls_x509_crt_init(&local_chain);
+    res = mbedtls_x509_crt_parse(&local_chain, local_report, report_size);
+    if (res != 0)
+    {
+        result = OE_FAILURE;
+        goto Cleanup;
+    }
+
+    if (local_chain.next == NULL)
+    {
+        result = OE_FAILURE;
+        goto Cleanup;
+    }
+
+    if (memcmp(chain.next->raw.p, local_chain.next->raw.p, local_chain.next->raw.len))
+    {
+        result = OE_FAILURE;
+        goto Cleanup;
+    }
+
+Cleanup:
+    mbedtls_x509_crt_free(&chain);
+    mbedtls_x509_crt_free(&local_chain);
+
+    return result;
 }
