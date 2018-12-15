@@ -8,8 +8,13 @@
 
 typedef int TEEC_Result;
 typedef int TEEC_Context;
-typedef pid_t TEEC_Session;
 typedef char TEEC_UUID;
+
+typedef struct _TEEC_Session {
+    pid_t pid;
+    int child_stdin;
+    int child_stdout;
+} TEEC_Session;
 
 typedef struct _TEEC_Operation {
     const void* in;
