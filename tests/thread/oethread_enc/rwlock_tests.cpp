@@ -7,15 +7,11 @@
 #include <openenclave/internal/thread.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "../args.h"
+#include <algorithm>
+#include "thread_t.h"
 
 static oe_rwlock_t rw_lock = OE_RWLOCK_INITIALIZER;
 static oe_spinlock_t rw_args_lock = OE_SPINLOCK_INITIALIZER;
-
-inline size_t max(size_t a, size_t b)
-{
-    return (a > b) ? a : b;
-}
 
 class ScopedSpinLock
 {
@@ -48,10 +44,12 @@ class ScopedSpinLock
     oe_spinlock_t* slock;
 };
 
-OE_ECALL void ReaderThreadImpl(void* args_)
+void enc_reader_thread_impl(
+    size_t** readers,
+    size_t** writers,
+    size_t** max_readers,
+    bool** readers_and_writers)
 {
-    TestRWLockArgs* args = (TestRWLockArgs*)args_;
-
     for (size_t i = 0; i < RWLOCK_TEST_ITERS; ++i)
     {
         // Obtain read lock.
@@ -61,38 +59,36 @@ OE_ECALL void ReaderThreadImpl(void* args_)
             // Update test data.
             ScopedSpinLock lock(&rw_args_lock);
 
-            ++args->readers;
+            ++(**readers);
 
             // Maximum number of simultaneous readers.
-            args->max_readers = max(args->max_readers, args->readers);
+            **max_readers = std::max(**max_readers, **readers);
 
             // Allow all reader threads to be simultaneously active
             // at least once.
-            while (args->max_readers < NUM_READER_THREADS)
+            while (**max_readers < NUM_READER_THREADS)
             {
                 lock.Unlock();
-                oe_call_host("host_usleep", (void*)sleep_utime);
+                host_usleep(sleep_utime);
                 lock.Lock();
             }
 
             // Are readers and writers simultaneously active?
-            args->readers_and_writers =
-                args->readers_and_writers || (args->readers && args->writers);
+            **readers_and_writers |= (**readers && **writers);
         }
 
         // Hold on to the lock for some time to test ownership constraints.
         // Multiple readers should be allowed.
-        oe_call_host("host_usleep", (void*)sleep_utime);
+        host_usleep(sleep_utime);
 
         {
             // Update test data.
             ScopedSpinLock lock(&rw_args_lock);
 
             // Are readers and writers simultaneously active?
-            args->readers_and_writers =
-                args->readers_and_writers || (args->readers && args->writers);
+            **readers_and_writers |= (**readers && **writers);
 
-            --args->readers;
+            --(**readers);
         }
 
         // Release read lock
@@ -102,10 +98,12 @@ OE_ECALL void ReaderThreadImpl(void* args_)
     oe_host_printf("%llu: Reader Exiting\n", OE_LLU(oe_thread_self()));
 }
 
-OE_ECALL void WriterThreadImpl(void* args_)
+void enc_writer_thread_impl(
+    size_t** readers,
+    size_t** writers,
+    size_t** max_writers,
+    bool** readers_and_writers)
 {
-    TestRWLockArgs* args = (TestRWLockArgs*)args_;
-
     for (size_t i = 0; i < RWLOCK_TEST_ITERS; ++i)
     {
         // Obtain write lock
@@ -115,29 +113,27 @@ OE_ECALL void WriterThreadImpl(void* args_)
             // Update test data
             ScopedSpinLock lock(&rw_args_lock);
 
-            ++args->writers;
+            ++(**writers);
 
             // Maximum number of simultaneous writers
-            args->max_writers = max(args->max_writers, args->writers);
+            **max_writers = std::max(**max_writers, **writers);
 
             // Are readers and writers simultaneously active?
-            args->readers_and_writers =
-                args->readers_and_writers || (args->readers && args->writers);
+            **readers_and_writers |= (**readers && **writers);
         }
 
         // Hold on to the lock for some time to test ownership constraints.
         // Only one writer should be allowed.
-        oe_call_host("host_usleep", (void*)sleep_utime);
+        host_usleep(sleep_utime);
 
         {
             // Update test data
             ScopedSpinLock lock(&rw_args_lock);
 
             // Are readers and writers simultaneously active?
-            args->readers_and_writers =
-                args->readers_and_writers || (args->readers && args->writers);
+            **readers_and_writers |= (**readers && **writers);
 
-            --args->writers;
+            --(**writers);
         }
 
         // Release write lock
