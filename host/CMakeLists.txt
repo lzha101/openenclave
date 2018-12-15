@@ -56,6 +56,7 @@ if (CMAKE_SYSTEM_PROCESSOR MATCHES "amd64.*|x86_64.*|AMD64.*")
         sgx/sgxquoteprovider.c
         sgx/sgxsign.c
         sgx/sgxtypes.c
+        sgx/traceh.c
     )
 
     # OS specific as well.
@@ -79,7 +80,10 @@ if (CMAKE_SYSTEM_PROCESSOR MATCHES "amd64.*|x86_64.*|AMD64.*")
             sgx/windows/exception.c
         )
     endif()
+
+    set(PLATFORM_FLAGS "-m64")
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm.*|ARM.*|aarch64.*|AARCH64.*")
+    set(PLATFORM_FLAGS "")
     message("TODO: ADD ARM files.")
 else()
     message(FATAL_ERROR "Unknown architecture. Only Intel and ARM are supported.")
@@ -96,7 +100,6 @@ add_library(oehost STATIC
     hexdump.c
     memalign.c
     ocalls.c
-    traceh.c
     result.c
     signkey.c
     strings.c
@@ -125,7 +128,7 @@ target_link_libraries(oehost PRIVATE bcrypt Crypt32)
 endif()
 
 if(UNIX)
-target_compile_options(oehost PRIVATE -Wno-attributes -Wmissing-prototypes -fPIC -m64)
+target_compile_options(oehost PRIVATE -Wno-attributes -Wmissing-prototypes -fPIC ${PLATFORM_FLAGS})
 target_compile_definitions(oehost PRIVATE _GNU_SOURCE)
 endif(UNIX)
 

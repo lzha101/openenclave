@@ -14,6 +14,10 @@ int sched_yield(void)
        returning 0 as a pause instruction is a hint to the CPU to improve
        power and performance of spin-wait loops.
      */
+#ifdef __x86_64__
     __asm__ __volatile__("pause");
+#else
+    __asm__ __volatile__("YIELD");
+#endif
     return 0;
 }
